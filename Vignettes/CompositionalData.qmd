@@ -1,0 +1,107 @@
+---
+title: "CompositionalData"
+format: html
+editor: visual
+---
+
+## Compositional Data
+
+Compositional data are data where the important information is represented by ratios. In immunology we can group cells into different types of immune cells. NHANES has collected Complete Blood Counts with 5-Part Differential in Whole Blood which are available in (CBC_L).
+
+The CDC describes these data, and their uses in the web page given below. https://wwwn.cdc.gov/Nchs/Data/Nhanes/Public/2021/DataFiles/CBC_L.htm
+
+\*The complete blood count (CBC) with 5-part differential counts red blood cells (RBCs), white blood cells (WBCs), and platelets, measures hemoglobin; estimates the red cells’ volume; and sorts the WBCs into subtypes. A CBC is a routine blood test used to evaluate your overall health and detect a wide range of disorders, including anemia, infection, and leukemia.
+
+These data will be used to estimate deficiencies and toxicities of specific nutrients in the population and subgroups, to provide population reference data, and to estimate the contribution of diet, supplements, and other factors to whole blood levels of nutrients. Data will be used for research to further define nutrient requirements as well as optimal levels for disease prevention and health promotion.\*
+
+
+```{r}
+library(phonto)
+library(nhanesA)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(robCompositions)
+```
+
+Load the data for the 2021-2023 cycle, labeled with an L.
+
+```{r}
+cbcL = nhanes("CBC_L")
+colnames(cbcL)
+compVars = c("LBXLYPCT", "LBXMOPCT", "LBXNEPCT","LBXEOPCT", "LBXBAPCT")
+```
+
+We will focus on the white blood cells:
+LBXLYPCT - Lymphocyte percent (%)
+LBXMOPCT - Monocyte percent (%)
+LBXNEPCT - Segmented neutrophils percent (%)
+LBXEOPCT - Eosinophils percent (%)
+LBXBAPCT - Basophils percent (%)
+
+In order to do some of the analyses we will also need to access the demographic variables as well. In the code below we read in the demography data and then use `dplyr` to join the two data frames on the unique identifier SEQN.
+
+```{r loadDemog}
+demoL = nhanes("DEMO_L")
+combD = inner_join(cbcL, demoL, by = "SEQN")
+```
+
+Next we will have a look at the compositions and make sure the data are complete and accurate.  We will need to remove any data for which these variables are missing and we will need to ensure that no sample has a value of zero for any of the types.  We achieve the latter by simply adding some small amount to any person who has a zero. We can keep track of those people and see if they somehow look unusual in the analysis.
+
+```{r findNAsand0s }
+
+anyNA = apply(combD[,compVars],1, function(x) sum(is.na(x)))
+combD = combD[!anyNA,]
+
+zeros = vector("list", length(compVars))
+names(zeros) = compVars
+
+for(i in 1:length(compVars)) zeros[[i]] = (combD[,compVars[i]]==0)
+sapply(zeros, sum)
+##some checking shows that there are 33 with zero counts for LBXEOPCT
+##so we will just add the minimum non-zero value in the data.
+
+combD$LBXEOPCT[zeros[["LBXEOPCT"]]] = 0.1
+combD$LBXBAPCT[zeros[["LBXBAPCT"]]] = 0.1
+## check to see how close the sums of the percentages are to 1
+cellprops = combD[,compVars]
+ctots = apply(cellprops, 1, sum)
+##and now transform to proportions...
+cellprops = sweep(cellprops, 1, ctots, "/")
+
+##FIXME - somehow the above seems not to work - there is on sample
+##still with a zero..
+
+
+```
+
+At this point we have transformed the data so that we have cell proportions, not percentages (that isn't so important) but we can start to explore the data a bit.
+
+Create some densities:
+
+```{r dplot}
+
+df_long <- cellprops %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+ggplot(df_long, aes(x = value)) +
+  geom_density(fill = "steelblue", alpha = 0.6) +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal()
+
+```
+
+We can see that Basophils and Eosinophils are pretty rare, neutrophils are the most common.  But there are people with relatively large proportions and or small proportions for most of these.
+
+It is not appropriate to try to understand the variation in the data directly from these.  Instead you should first transfrom the data to a scale that is more appropriate.  The basic challenge is that since the sum of the proportions must add to one then there are constraints on the proportions. And Euclidean geometry does not apply.  Mathematically the data are constrained to a simplex and the geometry there is more complicated.
+
+We wil use the methods described in Applied Compositional Data
+Analysis, by Peter Filzmoser, Karel Hron, and Matthias Templ. They suggest using the centered log ratios, which transform the data by dividing every row by its geometric mean, and then taking logarithms.
+In this transformed space (ie using that data) then Euclidean distance is approximately the same as distance on the simplex.
+
+```{r transformthenpca}
+clrProps = cenLR(cellprops)$x.clr
+clrPropsPCA = princomp(clrProps)
+
+clrPropsPCA$loadings
+```
