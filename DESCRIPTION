@@ -1,10 +1,10 @@
 Package: compositionalAnalysis
 Title: Compositional Analysis in NHANES
-Version: 0.0.0.9000
+Version: 0.0.1
 Authors@R: 
     person("Robert", "Gentleman", , "rgentlem@gmail.com", role = c("aut", "cre"))
 Description: Provides some examples of working with compositional data from NHANES.
-License: `use_mit_license()`
+License: Artistic-2.0 | file LICENSE
 Depends: robCompositions, phonto
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

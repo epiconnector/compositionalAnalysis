@@ -21,6 +21,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(robCompositions)
+library(splines)
 ```
 
 Load the data for the 2021-2023 cycle, labeled with an L.
@@ -134,4 +135,16 @@ boxplot(log(cellprops[ww, "LBXEOPCT"]), log(cellprops[-ww, "LBXEOPCT"]),main="LB
 
 ::::
 
+And now we can start to ask questions about whether variation in the different components is associated with any demographic or other participant characteristics.
+In the code below we look at fitting a spline model for age.
 
+```{r regressPCs}
+PCAs = clrPropsPCA$scores
+ans = rep(NA, ncol(PCAs))
+for(i in 1:ncol(PCAs)) {
+  lm1 = lm(PCAs[,i] ~ ns(combD$RIDAGEYR, df=5 ))
+  ans[i] = summary(lm1)$"r.squared"
+}
+
+ans
+```
