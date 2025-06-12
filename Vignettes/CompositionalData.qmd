@@ -15,7 +15,7 @@ The CDC describes these data, and their uses in the web page given below. https:
 These data will be used to estimate deficiencies and toxicities of specific nutrients in the population and subgroups, to provide population reference data, and to estimate the contribution of diet, supplements, and other factors to whole blood levels of nutrients. Data will be used for research to further define nutrient requirements as well as optimal levels for disease prevention and health promotion.</em>
 
 ```{r, include=FALSE, message=FALSE, warning=FALSE}
-library(phonto)
+#library(phonto)
 library(nhanesA)
 library(dplyr)
 library(ggplot2)
@@ -32,24 +32,75 @@ colnames(cbcL)
 compVars = c("LBXLYPCT", "LBXMOPCT", "LBXNEPCT","LBXEOPCT", "LBXBAPCT")
 ```
 
-We will focus on the white blood cells: 
+We will focus on the white blood cells:
 
-- **LBXLYPCT**: Lymphocyte percent (%) 
-- **LBXMOPCT**: Monocyte percent (%) 
-- **LBXNEPCT**: Segmented neutrophils percent (%) 
-- **LBXEOPCT**: Eosinophils percent (%) 
-- **LBXBAPCT**: Basophils percent (%)
+-   **LBXLYPCT**: Lymphocyte percent (%)
+-   **LBXMOPCT**: Monocyte percent (%)
+-   **LBXNEPCT**: Segmented neutrophils percent (%)
+-   **LBXEOPCT**: Eosinophils percent (%)
+-   **LBXBAPCT**: Basophils percent (%)
 
 In order to do some of the analyses we will also need to access the demographic variables as well. In the code below we read in the demography data and then use `dplyr` to join the two data frames on the unique identifier SEQN.
+
+From ChatGPT:
+
+CBC Parameters Affected by Demographics and Health Factors
+1. Sex
+Hemoglobin, Hematocrit, RBC count: Higher in males due to testosterone's stimulatory effect on erythropoiesis.
+
+Platelet count: Often slightly higher in females.
+
+Neutrophils & lymphocytes: May vary slightly by sex, though typically within normal limits.
+
+2. Age
+Infants: Higher lymphocyte counts.
+
+Elderly: May have slightly lower WBC and neutrophil counts; immunosenescence can affect lymphocyte subsets.
+
+3. BMI / Obesity
+Obesity is associated with:
+
+Low-grade systemic inflammation → may increase neutrophil and monocyte counts.
+
+Some studies show altered lymphocyte function and mild changes in platelets.
+
+Higher BMI may also be associated with increased WBC and CRP levels.
+
+4. Smoking
+Increases WBC count, particularly neutrophils and monocytes.
+
+Also associated with higher hemoglobin due to hypoxia-induced erythropoiesis.
+
+5. Race/Ethnicity
+Individuals of African ancestry may have lower neutrophil counts (a benign condition called benign ethnic neutropenia).
+
+6. Chronic Diseases
+Autoimmune diseases (e.g. lupus): can cause cytopenias or shifts in differential counts.
+
+Liver disease: Can cause thrombocytopenia and anemia.
+
+Kidney disease: Often leads to anemia due to reduced erythropoietin.
+
+Infection/inflammation: Affects differential (e.g., ↑ neutrophils in bacterial infections, ↑ lymphocytes in viral).
+
+
 
 ```{r loadDemog}
 demoL = nhanes("DEMO_L")
 combD = inner_join(cbcL, demoL, by = "SEQN")
+
+
+if( "package:phonto" %in% search())
+  saveRDS(combD, file="/HostData/Epiconnector/Data/combD.rds")
 ```
 
-Next we will have a look at the compositions and make sure the data are complete and accurate. We will need to remove any data for which these variables are missing and we will need to ensure that no sample has a value of zero for any of the types. We achieve the latter by simply adding some small amount to any person who has a zero. We can keep track of those people and see if they somehow look unusual in the analysis.
+## Try the Different models of Chapter 6
 
-```{r findNAsand0s }
+One suggestion Aitchison has for modeling things on the simplex in $d$ is to use a transformation from $R^d$. Here we will try to explore that a little and see how it works.
+
+For now we remove those with a zero count - but we can always just add a little and then renormalize if we need to.
+
+```{r additive}
 
 anyNA = apply(combD[,compVars],1, function(x) sum(is.na(x)))
 combD = combD[!anyNA,]
@@ -60,27 +111,155 @@ names(zeros) = compVars
 for(i in 1:length(compVars)) zeros[[i]] = (combD[,compVars[i]]==0)
 sapply(zeros, sum)
 ##some checking shows that there are 33 with zero counts for LBXEOPCT
+## and one for LBXBAPCT
 ##so we will just add the minimum non-zero value in the data.
 
 combD$LBXEOPCT[zeros[["LBXEOPCT"]]] = 0.1
 combD$LBXBAPCT[zeros[["LBXBAPCT"]]] = 0.1
 ## check to see how close the sums of the percentages are to 1
-cellprops = combD[,compVars]
-ctots = apply(cellprops, 1, sum)
-##and now transform to proportions...
-cellprops = sweep(cellprops, 1, ctots, "/")
 
-##FIXME - somehow the above seems not to work - there is on sample
-##still with a zero..
+
+compV = combD[,compVars]
+
+```
+
+Next we will have a look at the compositions and make sure the data are complete and accurate. We will need to remove any data for which these variables are missing and we will need to ensure that no sample has a value of zero for any of the types. We achieve the latter by simply adding some small amount to any person who has a zero. We can keep track of those people and see if they somehow look unusual in the analysis.
+
+```{r subsample }
+
+female = (1:nrow(combD))[combD$RIAGENDR=="Female"]
+male = (1:nrow(combD))[combD$RIAGENDR == "Male"]
+
+
+s1 = sample(female, size=1000)
+comp1 = compV[s1,]
+
+
+s2 = sample(male, size = 1000)
+comp2 = compV[s2,]
+
+##here we note that the column means are similar for the two groups and that LBXNEPCT
+## is the largest and hence makes a good candidate for the denominator
+colMeans(comp1)
+colMeans(comp2)
+
+
+ctots1 = apply(comp1, 1, sum)
+ctots2 = apply(comp2, 1, sum)
+##and now transform to proportions...
+cellprops1 = sweep(comp1, 1, ctots1, "/")
+cellprops2 = sweep(comp2, 1, ctots2, "/")
+
+##transform to additive log ratios - then we can look at how the Normal distribution looks
+ar1 = addLR(cellprops1, match("LBXNEPCT", colnames(cellprops1)))
+ar2 = addLR(cellprops2, match("LBXNEPCT", colnames(cellprops2)))
+
+par(mfrow=c(2,2))
+for(i in 1:4) { 
+  plot(density(ar1$x.alr[,i]), main=colnames(ar1$x.alr)[i])
+  lines(density(ar2$x.alr[,i]), col="skyblue")
+}
+```
+
+We can see slight differences in eosinophil and monocyt counts.
+At this point we have transformed the data so that we have cell proportions, not percentages (that isn't so important) but we can start to explore the data a bit.
+
+Next we can estimate the means and variance covariance of the aLR transformations above.
+
+```{r estmeans}
+
+mn1 = colMeans(ar1$x.alr)
+mn2 = colMeans(ar2$x.alr)
+
+# Variance-Covariance matrix
+cov1 <- cov(ar1$x.alr)
+cov2 <- cov(ar2$x.alr)
+
+
+library("Hotelling")
+library("biotools")
+
+xx = hotelling.test(x=ar1$x.alr, y=ar2$x.alr, var.equal = F)
+yy = hotelling.stat(x=ar1$x.alr, y=ar2$x.alr)
+
+boxM(rbind(ar1$x.alr, ar2$x.alr), c(rep("F", 1000), rep("M", 1000)))
+
+boxM(rbind(ar1$x.alr[1:100,], ar2$x.alr[1:100,]), c(rep("F", 100), rep("M", 100)))
 
 
 ```
 
-At this point we have transformed the data so that we have cell proportions, not percentages (that isn't so important) but we can start to explore the data a bit.
 
-Create some densities:
+## Some EDA
 
-```{r dplot}
+One idea is to look at all pairwise log-ratios (d * (d-1)) and take their variance.
+Ratios with small variances indicate pairs of variables that maintain a constant ratio
+over samples.  These likely should be combined, especially if the variance is very small as it could induce numerical instability in the matrix operations.
+
+```{r eda1}
+g1 = alr(LBXLYPCT~., comp1)
+sd1 = apply(g1,2,sd)
+g2 = alr(LBXMOPCT~., comp1)
+sd2 = apply(g2,2,sd)
+g3 = alr(LBXNEPCT~., comp1)
+sd3 = apply(g3,2,sd)
+g4 = alr(LBXEOPCT~., comp1)
+sd4 = apply(g4,2,sd)
+g5 = alr(LBXBAPCT~., comp1)
+sd5 = apply(g5,2,sd)
+
+sdmat = matrix(1, nr=5, nc=5)
+colnames(sdmat) = colnames(comp1)
+rownames(sdmat) = colnames(comp1)
+sdmat[1,names(sd1)] = sd1
+sdmat[2,names(sd2)] = sd2
+sdmat[3,names(sd3)] = sd3
+sdmat[4,names(sd4)] = sd4
+sdmat[5,names(sd5)] = sd5
+
+pheatmap(sdmat, 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         show_rownames = TRUE,
+         show_colnames = TRUE)
+
+
+g1M = alr(LBXLYPCT~., comp2)
+sd1M = apply(g1M,2,sd)
+g2M = alr(LBXMOPCT~., comp2)
+sd2M = apply(g2M,2,sd)
+g3M = alr(LBXNEPCT~., comp2)
+sd3M = apply(g3M,2,sd)
+g4M = alr(LBXEOPCT~., comp2)
+sd4M = apply(g4M,2,sd)
+g5M = alr(LBXBAPCT~., comp2)
+sd5M = apply(g5M,2,sd)
+
+sdmatM = matrix(1, nr=5, nc=5)
+colnames(sdmatM) = colnames(comp2)
+rownames(sdmatM) = colnames(comp2)
+sdmatM[1,names(sd1M)] = sd1M
+sdmatM[2,names(sd2M)] = sd2M
+sdmatM[3,names(sd3)] = sd3M
+sdmatM[4,names(sd4)] = sd4M
+sdmatM[5,names(sd5)] = sd5M
+
+pheatmap(sdmatM, 
+         cluster_rows = TRUE, 
+         cluster_cols = TRUE, 
+         show_rownames = TRUE,
+         show_colnames = TRUE)
+
+
+
+
+```
+
+
+
+Create some densities: old code - could fix up for the densityies above...
+
+```{r dplot, eval=FALSE}
 
 df_long <- cellprops %>%
   pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
@@ -96,23 +275,19 @@ We can see that Basophils and Eosinophils are pretty rare, neutrophils are the m
 
 It is not appropriate to try to understand the variation in the data directly from these. Instead you should first transfrom the data to a scale that is more appropriate. The basic challenge is that since the sum of the proportions must add to one then there are constraints on the proportions. And Euclidean geometry does not apply. Mathematically the data are constrained to a simplex and the geometry there is more complicated.
 
-We wil use the methods described in Applied Compositional Data Analysis, by Peter Filzmoser, Karel Hron, and Matthias Templ. They suggest using the centered log ratios, which transform the data by dividing every row by its geometric mean, and then taking logarithms. In this transformed space (ie using that data) then Euclidean distance is approximately the same as distance on the simplex.
+We will use the methods described in Applied Compositional Data Analysis, by Peter Filzmoser, Karel Hron, and Matthias Templ. They suggest using the centered log ratios, which transform the data by dividing every row by its geometric mean, and then taking logarithms. In this transformed space (ie using that data) then Euclidean distance is approximately the same as distance on the simplex.
 
 ```{r transformthenpca}
-clrProps = cenLR(cellprops)$x.clr
-clrPropsPCA = princomp(clrProps)
+alrProps = aLR(cellprops)$x.clr
+clrPropsPCA = princomp(alrProps)
 
 clrPropsPCA$loadings
 ```
 
-Now we can look at a plot of the PCs and see if we see anything interesting.  We could also perform regression of the PCs against different features to get a sense of what might be driving variation in the model.
-We see in the plot of PC1 versus PC2 that there is a group of points that have high values on PC1. The boxplot is produced where the left box represents `LBXEOPCT` values for the observations with high values of PC1 and the right box is based on everyone else.  We can see that those observations with high values of PC 1 have very low values of `LBXEOPCT`.  This could be due to bacterial infection or other health issues that result in low eosinophil counts.
+Now we can look at a plot of the PCs and see if we see anything interesting. We could also perform regression of the PCs against different features to get a sense of what might be driving variation in the model. We see in the plot of PC1 versus PC2 that there is a group of points that have high values on PC1. The boxplot is produced where the left box represents `LBXEOPCT` values for the observations with high values of PC1 and the right box is based on everyone else. We can see that those observations with high values of PC 1 have very low values of `LBXEOPCT`. This could be due to bacterial infection or other health issues that result in low eosinophil counts.
 
-
-:::: {.columns}
-
+::::: columns
 ::: {.column width="50%"}
-
 ```{r plotPCS, echo=FALSE }
 plot(clrPropsPCA$scores[,1], clrPropsPCA$scores[,2], col=ifelse(combD$RIAGENDR=="Male", "red", "blue"), xlab="PC 1", ylab="PC 2")
 
@@ -120,23 +295,18 @@ plot(clrPropsPCA$scores[,1], clrPropsPCA$scores[,2], col=ifelse(combD$RIAGENDR==
 ##to be robust against PCA direction switching
 
 ```
-
 :::
 
 ::: {.column width="50%"}
-
 ```{r plotPCS2, echo=FALSE}
 ww = which(clrPropsPCA$scores[,1] > 2)
 
 boxplot(log(cellprops[ww, "LBXEOPCT"]), log(cellprops[-ww, "LBXEOPCT"]),main="LBXEOPCT")
 ```
-
 :::
+:::::
 
-::::
-
-And now we can start to ask questions about whether variation in the different components is associated with any demographic or other participant characteristics.
-In the code below we look at fitting a spline model for age.
+And now we can start to ask questions about whether variation in the different components is associated with any demographic or other participant characteristics. In the code below we look at fitting a spline model for age.
 
 ```{r regressPCs}
 PCAs = clrPropsPCA$scores
