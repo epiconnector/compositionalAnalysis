@@ -1,0 +1,251 @@
+---
+title: "Aitchison and Ng"
+
+format: pdf
+
+editor: visual
+---
+
+## The paper
+
+Aitchison and Ng discuss the use of compositional data tools to try and understand the contents of cows milk. The data are taken from there paper and consist of measurements of the compositin of milk from a number of dairy cows. They state:
+
+In an attempt to improve the quality of cow’s milk, milk from each of thirty cows was
+assessed by dietary composition before and after a strictly controlled dietary and
+hormonal regime over a period of eight weeks. Although seasonal variations in milk
+quality could probably be regarded as negligible over this period a control group of
+thirty cows was kept under the same conditions but on the standard regime. The sixty
+cows were of course allocated to control and treatment groups at random. Table 1
+provides a set of typical before and after results for ten cows, five in the control group
+and five in the treatment group, showing the protein, milk fat, carbohydrate, calcium,
+sodium and potassium proportions by weight of total dietary content. The full data set
+is obtainable in Appendix Table 1. The purpose of the experiment is to determine
+whether the new regime has produced any significant change in the milk composition...
+
+
+The key features are 
+
+- **Pr** : Proportion of protein.
+- **Mf** : Proportion of milk fat.
+- **Ch** : Proportion of carbohydrate.
+- **Ca** : Proportion of calcium.
+- **Na** : Proportion of sodium.
+- **K**  : Proportion of potassium.
+- **Group** : Which group: Contol, Before and After
+
+The control group consists of 30 cows, each with a before (rows 1 to 30) and an after (rows 31 to 60) measurement.
+The original treated data also consisted of 30 cows with before and after, however the paper the data was extracted from
+only had 24 cows in the after group.  We hope that these are the first 24 and treat them as such.
+
+## Loading
+
+We next want to load the libraries and the data so that we can explore some of the methods that are being described and
+
+```{r, message=FALSE, warning=FALSE}
+library(compositionalAnalysis)
+#not sure where to get the Hotelling's test 
+library(rrcov)
+```
+
+We will load up the milk composition data from Aithchison and Ng and try to do some of the analyses that they report on. Since the data are incomplete we will only work with the first 24 of the Before and After samples. We need to define the notion of closure.
+
+The sample space associated with D-part compositions is the unit simplex:
+
+$$
+S^D = \{ [x_1, \ldots, x_D] , x_i \geq 0, x_1 + \cdots + x_D = 1 \}
+$$
+
+And so any element in this sample space needs to comply with those requirements.  The *closure* operator takes a vector of positive values as input and returns the vector normalized to sum to one.
+
+Next we define the notion of a perturbation.  For any two D-part compositions, $x$ and $y$, with $x, y \in S^D$, we can define $ x \oplus y$ as
+$$
+ x \oplus y = [x_1 y_1, \ldots, x_D y_D]/(x_1 y_1 + \cdots x_D y_D) = C[x_1 y_1, \ldots, x_D y_D]
+$$
+For our problems we want to find the perturbation, $p$, that transforms one obesrvation $x_B$, a before measurement, into a second observation, $x_A$, an after measurement.  We want $p$ such that $x_A$ = $p \oplus x_B$. 
+That is found by the inverse operation,
+
+$$
+
+p = x_B \, \Theta \, x_A = C[x_{A1}/x_{B1}, \ldots, x_{AD} / x_{BD}]
+
+$$
+
+```{r}
+data("MilkComposition")
+Closure = function(x) {
+  if(any(x < 0 ) ) stop("only positive values allowed")
+  return(x/sum(x))
+}
+
+## since there are 30 cows, obs 1 and 31 are on the same cow
+## and this finds the perturbation.
+
+Closure(MilkComposition[31,1:6]/ MilkComposition[1,1:6])
+```
+
+Above we have show how to compute the perturbation, $p$ that would be applied to the before measurement (observation 1) to yield
+the after measurement - observation 31, for the first cow.
+
+Now, we approach each of the inference questions from Aitchison and Ng.
+**Question 1** Is there any evidence of seasonal change in milk composition, in other
+words is there any evidence of differences in the milk compositions of the control
+group between the beginning and end of the trial? Phrased as a compositional
+hypothesis this is simply a question of whether the centre of the control group
+perturbations is the identity perturbation. A standard way of testing such a hypothesis
+is through the logratio analysis of Aitchison (1986). Transformed into logratio terms
+this is simply asking whether the mean of the additive logratio vectors
+$$
+   q = alr(p) = [\log(p_1/p_6), \ldots, \log(p_5/p_6)]
+$$ 
+
+is a zero vector.  For this we can use Hotelling’s T- squared test.
+Note that the closure of a vector $x$ with itself is the vector with values $1/d$, where $d$ is the number of
+components in the composition.  Thus, when we are asking if the experiment had no effect we would expect
+to see perturbations that are all approximately $1/d$.
+
+If we transform such a vector to ALR space, then all components should be approximately zero, since
+all of the ratios should be approximately constant, at **one** if all the perturbations are $1/d$.
+
+```{r Hotelling}
+MilkControl = as.matrix(MilkComposition[MilkComposition$Group == "Control", 1:6])
+perturbs = matrix(0, nrow=30, ncol=6)
+for(i in 1:30) perturbs[i,] = Closure(MilkControl[i+30,]/ MilkControl[i,])
+colnames(perturbs) = colnames(MilkControl)[1:6]
+## this is similar to, but not the same as the result in their paper
+mnperturb = apply(perturbs, 2, mean)
+
+## the Ng and Aitchison paper reports:
+## [0.1595 0.1835 0.1599 0.1818 0.1458 0.1695]
+## I get a similar, but not identical answer
+round(mnperturb, digits = 4)
+
+
+sdperturb = apply(perturbs, 2, sd)
+##the difference here probably helps us understand what
+##has changed - more Mf and Ca with less Na
+mnperturb - rep(1/6,6)
+
+##then compute the ALR for the perturbations
+milkCalr = addLR(perturbs)
+
+apply(milkCalr$x.alr, 2, mean)
+
+##we can look at the variances as well
+apply(milkCalr$x.alr, 2, sd)
+
+##now for the test - results not at all in line with the paper
+
+T2.test(milkCalr$x.alr)
+```
+
+We got results that are similar to those reported in the paper.
+
+*This comparison shows that the alr mean is significantly different from zero at the 0.1 percent significance level and therefore that the centre of the perturbations is significantly different from the identity perturbation.* 
+*We thus conclude that there is substantial evidence of a seasonal change which justifies the insistence on having a control group. The centre of the control group perturbations is [0.1595 0.1835 0.1599 0.1818 0.1458 0.1695].*
+
+
+## Consider a two sample test
+
+Instead of computing the per individual perturbations one could also simply take the before and after data sets and compare them using Hotellings $T^2$ test.  In some ways one might want to consider the two groups separately in order to study whether the covariance structure was similar or different at the two time points.
+
+Here is where it might be good to try simulating and then comparing what we get by doing a paired-perturbation experiment
+versus doing a two sample experiment. That should help sort out both estimation and power.
+
+
+```{r twosample}
+
+Cbefore = as.matrix(MilkComposition[1:30,1:6])
+Cafter = as.matrix(MilkComposition[31:60, 1:6])
+Cb.arl = addLR(Cbefore)
+Ca.arl = addLR(Cafter)
+
+apply(Cb.arl$x.alr, 2, mean)
+apply(Cb.arl$x.alr, 2, sd)
+
+apply(Ca.arl$x.alr, 2, mean)
+apply(Ca.arl$x.alr, 2, sd)
+
+t2 = T2.test(x=Cb.arl$x.alr, y=Ca.arl$x.alr)
+t2
+
+
+```
+In this case we do not get a significant result.  This is likely due to the lack of accounting for pairing in the analysis.
+
+## Will PCA or similar approaches help 
+
+Now the transformation to ALR space then allows us to try out different methods to try and understand the geometry of
+the data.  We can, in that space look at principal components and see if they provide any insight.
+
+```{r prcomp}
+pr1 = prcomp(milkCalr$x.alr)
+
+```
+
+
+## Subcompositions
+
+Ng and Aitchison also consider using perturbations to study subcomposition analysis.
+Their Section 3.2 is repeated below:
+
+*Testing hypotheses of subcompositional stability.* While the above analysis was
+sufficient for the aim of the experiment we can use this example to illustrate another
+important form of compositional hypothesis, namely subcompositional stability. For
+example in geology in the study of the major-oxide chemistry of a series of rocks the
+question may arise as to whether certain oxides stay roughly constant relative to each
+other, in other words whether the subcomposition of these major oxides is stable. Let
+us place such a hypothesis within the framework of our milk composition problem.
+Suppose that it had been suggested that seasonal change would not affect the relative
+proportions of the minor elements (Ca, K, Na). This suggestion is clearly expressible
+as a perturbation hypothesis, namely that the perturbation is of the form
+$$
+ \xi_C = [\xi_1, \xi_2, \xi_3, \xi_4, \xi_5, \xi_6 ]
+$$
+with the last three components corresponding to the minor
+elements. Under $H_0$ $alr(\xi_C)$ takes the form $[\eta_1, \eta_2, \eta_3, 0, 0 ]$
+the hypothesis of subcompositional stability is simply a linear hypothesis within standard multivariate
+analysis and an exact test exists. We can, however apply an easier test. Since the
+hypothesis refers to the (Ca, K, Na) subcomposition we can confine consideration to
+the before-after perturbations associated with these subcompositions and ask whether
+these have an $alr$ mean of [0 0]. For the control group this gives a $T^2$ value of 3.52 to
+be compared against a 5 per cent critical value of 6.99; for the treatment group the $T^2$
+value is 10.45. Thus a reasonable conclusion is that the (Ca, K, Na) subcomposition is
+stable against seasonal change but that there is significant instability in the presence
+of treatment.
+
+In the code below we set up the test for the control group.
+But I do not get the same result as they did.  So I am not sure just what is going on here.
+
+```{r subcomp}
+subcB = Cbefore[,c(4,5,6)]
+subcA = Cafter[, c(4,5,6)]
+
+subpert = matrix(0, nr=30, nc=3)
+for(i in 1:30) subpert[i,] = Closure(MilkControl[i+30,c(4,5,6)]/ MilkControl[i,c(4,5,6)])
+colnames(subpert) = colnames(subcB)
+## 
+mnsubpert = apply(subpert, 2, mean)
+
+## close to the identify of 1/3
+round(mnsubpert, digits = 4)
+
+subalr = addLR(subpert)
+
+subxx = T2.test(x=subalr$x.alr)
+subxx
+
+```
+
+By looking at the pairs plot for the perturbations we see that the negative correlation between Ca and Na is very strong while K seems to have a negative correlation with NA and a positive correlation with Ca.
+
+One can also look at the raw data, via pairs, and see that there are strong negative correlations present in many of the variables.  There appears to be some strong relationships between Pr, Mf and Ch as well are between Ca, Na and K, although the latter are not so obvious until you subset down just to those three.
+
+```{r pairs}
+
+pairs(subpert)
+
+# pairs(perturbs)
+
+# pairs(Cafter[,c(4,5,6)])
+
+```
