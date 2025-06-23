@@ -24,15 +24,81 @@ The key features are
 
 The control group consists of 30 cows, each with a before (rows 1 to 30) and an after (rows 31 to 60) measurement. The original treated data also consisted of 30 cows with before and after, however the paper the data was extracted from only had 24 cows in the after group. We hope that these are the first 24 and treat them as such.
 
+There are a number of interesting comparisons that can be made, and different ways in which estimates can be developed and hypotheses tested.  First, we can compare the treated and untreated cows at the beginning. Since cows were randomly assigned to the two groups and tests should yield a null result and find no difference.  Comparing the control cows between the two time points allows us to estimate the seasonal effect using within cow comparisons, but it could also be done by treating the two time points seperately.
+
+The treated cows can be compared before and after, also either as a paired T test or as a two sample T test. Here the difference would be a combination of the seasonal difference as well as the treatment difference. And one might try to subtract, in some way the seasonal effect estimated for the control group.  A similar approach would be to subtract the seasonal difference from each cow (perhaps sampling from a distribution that was consistent with what was observed for the control group) 
+and then comparing to the treatment group at the second time point, after the treatment has had an effect. 
+
+
 ## Loading
 
-We next want to load the libraries and the data so that we can explore some of the methods that are being described and
+We next want to load the libraries and the data so that we can explore some of the methods that are being described and understand how they impact the analysis.  Below are three simple helper functions that implement a geometric mean, the closure of a set of numbers with respect to a unit sum, and a vector version of the inverse of the additive log ratio transformation.  
+
+We load the compositionalAnalysis package to get additional datasets.
 
 ```{r, message=FALSE, warning=FALSE}
 library(compositionalAnalysis)
 #not sure where to get the Hotelling's test 
 library(rrcov)
+
+##a helper function
+geometric_mean <- function(x) {
+  if (any(x <= 0)) {
+    stop("Geometric mean is only defined for positive numbers.")
+  }
+  exp(mean(log(x)))
+}
+
+Closure = function(x) {
+  if(any(x < 0 ) ) stop("only positive values allowed")
+  return(x/sum(x))
+}
+
+## given a D-1 dimensional vector compute the alr inverse function on a vector
+##the alrInv function in robCompositions wants to inverse a data matrix.
+alrInv = function(x) { Closure(c(exp(x),1))}
+
+
 ```
+
+We begin with Aitchison's hongite example, with data extracted from the Table 1.1.1 of the paper. This is mostly to ensure that we are capturing the right quantities.
+
+```{r hongite}
+
+hongite = read.delim("data/HongiteTab111", sep=" ", head=F)
+##drop col 1, just the observation number
+hongite = hongite[,-1]
+colnames(hongite) = LETTERS[1:5]
+
+hongitealr = addLR(hongite)
+
+##values from the paper - we should see agreement
+#  0.1386 0.2641 -0.2233 0.1214
+#  0.2641 0.6490 -0.7020 0.1444
+# -0.2233 -0.7020 0.9476 0.0116
+#  0.1214 0.1444 0.0116 0.1871
+round(cov(hongitealr$x.alr), digits=3)
+
+## values taken from the paper - should be in agreement
+## this calculates the variance of each of the log(x_i)/log(x_j) pairs
+## and is equivalent to the values above (in that one can be obtained from the other
+## using matrix methods).
+## NOTE: it is not symmetric
+
+#  0 0.2593 1.5329 0.0828 0.1386
+#  0.2593 0 3.0007 0.5473 0.6490
+#  1.5329 3.0007 0 1.1115 0.9476
+#  0.0828 0.5473 1.1115 0 0.1871
+#  0.1386 0.6490 0.9476 0.1871 0
+
+round(variation(hongitealr$x.alr, method = "Pairwise"), digits=4)
+
+##we can compute the geometric means in the closure space
+round(Closure(apply(hongite,2, geometric_mean)), digits=3)
+
+
+```
+
 
 We will load up the milk composition data from Aithchison and Ng and try to do some of the analyses that they report on. Since the data are incomplete we will only work with the first 24 of the Before and After samples. We need to define the notion of closure.
 
@@ -46,7 +112,7 @@ And so any element in this sample space needs to comply with those requirements.
 
 Next we define the notion of a perturbation. For any two D-part compositions, $x$ and $y$, with $x, y \in S^D$, we can define \$ x \oplus y\$ as $$
  x \oplus y = [x_1 y_1, \ldots, x_D y_D]/(x_1 y_1 + \cdots x_D y_D) = C[x_1 y_1, \ldots, x_D y_D]
-$$ For our problems we want to find the perturbation, $p$, that transforms one obesrvation $x_B$, a before measurement, into a second observation, $x_A$, an after measurement. We want $p$ such that $x_A$ = $p \oplus x_B$. That is found by the inverse operation,
+$$ For our problems we want to find the perturbation, $p$, that transforms one obesrvation $x_B$, a before measurement, into a second observation, $x_A$, an after measurement. We want $p$ such that $x_A = p \oplus x_B$. That is found by the inverse operation,
 
 \$\$
 
@@ -56,10 +122,6 @@ p = x_B , \Theta , x_A = C\[x\_{A1}/x\_{B1}, \ldots, x\_{AD} / x\_{BD}\]
 
 ```{r}
 data("MilkComposition")
-Closure = function(x) {
-  if(any(x < 0 ) ) stop("only positive values allowed")
-  return(x/sum(x))
-}
 
 ## since there are 30 cows, obs 1 and 31 are on the same cow
 ## and this finds the perturbation.
@@ -114,22 +176,43 @@ We got results that are similar to those reported in the paper.
 *This comparison shows that the alr mean is significantly different from zero at the 0.1 percent significance level and therefore that the centre of the perturbations is significantly different from the identity perturbation.* *We thus conclude that there is substantial evidence of a seasonal change which justifies the insistence on having a control group. The centre of the control group perturbations is \[0.1595 0.1835 0.1599 0.1818 0.1458 0.1695\].*
 
 
-Now we will check out the perturbation data
+Now we will check out the perturbation data that was provided in the Aitchison undated manuscript.
+Here we just start with the perturbations.  But we note that the perturbations are themselves compositional
+and it may be useful to apply some of the basic tools.
+
+Perturbations are useful here as ways to specify a model, that can then be tested.
+Let $\xi$ denote the true perturbation vector that transforms a before measurement into an after measurement.
+Then for each cow, we have $x_{Ai} = \xi \oplus x_{Bi}$. And the observed perturbations $p_{i} =  C\[x\_{Ai1}/x\_{Bi1}, \ldots, x\_{AiD} / x\_{BiD}\]$ are estimates of $\xi$.  Thus we could make some assumptions on the distribution of the $p+i$, such as the additive log Normal and use that as a basis for inference. This approach is likely to be more powerful than treating the data as a two sample comparison, since it blocks on individual.
+
 ```{r perturbdata}
 data("cowperturbations")
-beforeP = as.matrix(cowperturbations[1:30, 2:7 ])
-bfPalr = addLR(beforeP)
+controlP = as.matrix(cowperturbations[1:30, 2:7 ])
+bfPalr = addLR(controlP)
 
+## we can examine the covariance matrix of the alr transformed data
+round(cov(bfPalr$x.alr), digits=3)
+
+par(mfrow=c(2,3))
+for(i in 1:6) plot(density(controlP[,i]), main=colnames(controlP)[i])
+
+for(i in 1:5) plot(density(bfPalr$x.alr[,i]), main=colnames(controlP)[i])
+
+
+controlV = variation(controlP, method="Pairwise")
+# heatmap(controlV)
 T2.test(bfPalr$x.alr)
 
 ##get control means
 mnct = apply(bfPalr$x.alr, 2, mean)
-ctlmns = addLRinv(matrix(mnct, nr=1), cnames=colnames(beforeP))
+ctlmns = addLRinv(matrix(mnct, nr=1), cnames=colnames(controlP))
 
 ## [pr mf ch Ca Na K]control = [0.1595 0.1835 0.1599 0.1818 0.1458 0.1695]
 print(ctlmns, digits=4)
 
+########################################
 ##now look at treated
+########################################
+
 
 treatP = as.matrix(cowperturbations[31:60,2:7])
 treatPalr = addLR(treatP)
@@ -139,8 +222,18 @@ treatPalr = addLR(treatP)
 mntrt = apply(treatPalr$x.alr, 2, mean)
 trtmns = addLRinv(matrix(mntrt, nr=1), cnames=colnames(beforeP))
 
+treatV = variation(treatP, method="Pairwise")
+heatmap(treatV)
 ##[pr mf ch Ca Na K]treat = [0.1928 0.1416 0.1589 0.2309 0.1338 0.1420].
 print(trtmns, digits=4)
+
+par(mfrow=c(2,3))
+for(i in 1:6) plot(density(treatP[,i]), main=colnames(treatP)[i])
+
+## now K is the denominator for all of these
+for(i in 1:5) plot(density(treatPalr$x.alr[,i]), main=colnames(treatP)[i])
+
+
 
 ##then we can find the perturbation that takes you from ctl to trt
 ## [pr mf ch Ca Na K]treat-control = [0.2015 0.1286 0.1656 0.2117 0.1529 0.1397]
