@@ -51,7 +51,7 @@ geometric_mean <- function(x) {
 
 Closure = function(x) {
   if(any(x < 0 ) ) stop("only positive values allowed")
-  return(x/sum(x))
+  return(as.numeric(x/sum(x)))
 }
 
 ## given a D-1 dimensional vector compute the alr inverse function on a vector
@@ -94,6 +94,7 @@ round(cov(hongitealr$x.alr), digits=3)
 round(variation(hongitealr$x.alr, method = "Pairwise"), digits=4)
 
 ##we can compute the geometric means in the closure space
+##this can also be done using the aLR values and representing them in the appropriate simplex.
 round(Closure(apply(hongite,2, geometric_mean)), digits=3)
 
 
